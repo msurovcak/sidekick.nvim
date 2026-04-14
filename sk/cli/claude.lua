@@ -53,38 +53,72 @@ local function discover_sessions(cwd, limit)
     .iter(file_info)
     :take(limit)
     :map(function(info)
+      local session_id = info.filename:match("^(.+)%.jsonl$")
+      if not session_id then
+        return nil
+      end
+
       local fd = vim.uv.fs_open(info.path, "r", 438)
       if not fd then
         return nil
       end
-      local first_line_stat = vim.uv.fs_fstat(fd)
-      if not first_line_stat then
+      local file_stat = vim.uv.fs_fstat(fd)
+      if not file_stat then
         vim.uv.fs_close(fd)
         return nil
       end
-      -- Read up to 1KB for the first line (should be enough for summary)
-      local data = vim.uv.fs_read(fd, math.min(first_line_stat.size, 1024), 0)
+      -- Read up to 8KB to scan the first ~20 lines for a summary or user message
+      local data = vim.uv.fs_read(fd, math.min(file_stat.size, 8192), 0)
       vim.uv.fs_close(fd)
 
+      local title = nil
       if data then
-        local first_line = data:match("^([^\n]*)")
-        if first_line then
-          local ok, meta = pcall(vim.json.decode, first_line)
-          if ok and meta and meta.type == "summary" then
-            -- Extract session ID from filename (UUID)
-            local session_id = info.filename:match("^(.+)%.jsonl$")
-            if session_id then
-              return {
-                id = session_id,
-                title = meta.summary,
-                updated = info.mtime,
-                cli_name = "claude",
-                cwd = cwd,
-              }
+        local lines_scanned = 0
+        local first_user_text = nil
+        for line in data:gmatch("([^\n]+)") do
+          lines_scanned = lines_scanned + 1
+          if lines_scanned > 20 then
+            break
+          end
+          local ok, meta = pcall(vim.json.decode, line)
+          if ok and meta then
+            if meta.type == "summary" and meta.summary then
+              -- Prefer explicit summary lines (forward-compatible)
+              title = meta.summary
+              break
+            elseif first_user_text == nil and meta.type == "user" then
+              -- Fall back to first user message text
+              local content = meta.message and meta.message.content
+              if type(content) == "string" then
+                first_user_text = content
+              elseif type(content) == "table" then
+                for _, part in ipairs(content) do
+                  if type(part) == "table" and part.type == "text" and part.text then
+                    first_user_text = part.text
+                    break
+                  end
+                end
+              end
             end
           end
         end
+        if not title then
+          title = first_user_text
+        end
       end
+
+      -- Truncate long titles
+      if title and #title > 80 then
+        title = title:sub(1, 80) .. "..."
+      end
+
+      return {
+        id = session_id,
+        title = title or session_id,
+        updated = info.mtime,
+        cli_name = "claude",
+        cwd = cwd,
+      }
     end)
     :filter(function(session)
       return session ~= nil
