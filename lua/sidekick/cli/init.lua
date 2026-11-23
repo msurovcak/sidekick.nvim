@@ -23,6 +23,7 @@ local M = {}
 ---@field native_scroll? boolean whether the tool handles scrolling natively
 ---@field resume? string[] Resume arguments (e.g., {"-r"} for claude, {"-s"} for opencode)
 ---@field discover_sessions? fun(cwd: string, limit: number): sidekick.cli.session.Info[] Discover sessions for this CLI
+---@field priority? number Sort order in the picker; higher comes first (default 0)
 
 ---@class sidekick.cli.Show
 ---@field name? string

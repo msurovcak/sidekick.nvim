@@ -132,6 +132,10 @@ function M.get(filter)
     if a.external ~= b.external then
       return not a.external
     end
+    local a_prio, b_prio = a.tool.priority or 0, b.tool.priority or 0
+    if a_prio ~= b_prio then
+      return a_prio > b_prio
+    end
     return a.tool.name < b.tool.name
   end)
   return ret
